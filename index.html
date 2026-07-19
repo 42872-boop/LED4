@@ -33,23 +33,30 @@
             width: 100%;
             cursor: pointer;
             margin-bottom: 20px;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #0062cc;
         }
         button:disabled {
             background: #d1d1d6;
             cursor: not-allowed;
         }
-        #webcam-container {
+        .video-wrapper {
             width: 280px;
             height: 280px;
             margin: 0 auto 20px;
-            background: #e5e7eb;
+            background: #000;
             border-radius: 16px;
             overflow: hidden;
+            position: relative;
         }
-        #webcam-container canvas {
-            width: 100% !important;
-            height: 100% !important;
+        /* Native video element handling */
+        #webcam {
+            width: 100%;
+            height: 100%;
             object-fit: cover;
+            transform: scaleX(-1); /* Flips the video to act like a mirror */
         }
         .result-item {
             display: flex;
@@ -59,6 +66,7 @@
             margin-bottom: 8px;
             border-radius: 10px;
             font-size: 15px;
+            border-left: 4px solid #007aff;
         }
         .status {
             font-size: 13px;
@@ -70,37 +78,46 @@
 <body>
 
 <div class="card">
-    <h2>AI Vision System</h2>
-    <button type="button" id="btn" onclick="init()">Start Camera</button>
-    <div id="webcam-container"></div>
+    <h2>Native AI Vision</h2>
+    <button type="button" id="btn" onclick="startSystem()">Start System</button>
+    <div class="video-wrapper">
+        <!-- Using native HTML5 Video tag instead of library-generated canvases -->
+        <video id="webcam" autoplay playsinline muted></video>
+    </div>
     <div id="label-container"></div>
-    <div class="status" id="status" style="display:none;">🔄 Updating predictions every 3 seconds</div>
+    <div class="status" id="status" style="display:none;">🔄 AI predicting every 3 seconds</div>
 </div>
 
+<!-- Load TensorFlow and Teachable Machine Image Model Libraries Only -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
 
 <script type="text/javascript">
-    const URL = "https://teachablemachine.withgoogle.com/models/OD2g-JJnk/";
-    let model, webcam, labelContainer, maxPredictions;
-    let lastTime = 0;
+    const MODEL_URL = "https://teachablemachine.withgoogle.com/models/OD2g-JJnk/";
+    let model, maxPredictions, labelContainer;
+    let predictionInterval;
 
-    async function init() {
-        document.getElementById("btn").disabled = true;
-        document.getElementById("btn").innerText = "Loading Model...";
+    async function startSystem() {
+        const btn = document.getElementById("btn");
+        btn.disabled = true;
+        btn.innerText = "Initializing...";
 
         try {
-            model = await tmImage.load(URL + "model.json", URL + "metadata.json");
+            // 1. Load the AI Model metadata
+            model = await tmImage.load(MODEL_URL + "model.json", MODEL_URL + "metadata.json");
             maxPredictions = model.getTotalClasses();
 
-            webcam = new tmImage.Webcam(200, 200, true); 
-            await webcam.setup(); 
-            await webcam.play();
+            // 2. Request native browser camera stream 
+            const videoElement = document.getElementById("webcam");
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 400, height: 400, facingMode: "user" },
+                audio: false
+            });
             
-            window.requestAnimationFrame(loop);
+            // Link raw hardware camera feed directly into the video player element
+            videoElement.srcObject = stream;
 
-            document.getElementById("webcam-container").appendChild(webcam.canvas);
-            
+            // 3. Setup container UI rows for classes
             labelContainer = document.getElementById("label-container");
             labelContainer.innerHTML = "";
             for (let i = 0; i < maxPredictions; i++) {
@@ -109,34 +126,32 @@
                 labelContainer.appendChild(div);
             }
 
-            document.getElementById("btn").innerText = "System Active";
             document.getElementById("status").style.display = "block";
-            lastTime = Date.now();
+            btn.innerText = "System Active";
 
-        } catch (e) {
-            console.error(e);
-            alert("Camera Access Error: Switch to CodePen/Codesandbox or use VS Code Live Server to run this successfully.");
-            document.getElementById("btn").disabled = false;
-            document.getElementById("btn").innerText = "Try Again";
-        }
-    }
+            // Run initial setup classification right away
+            setTimeout(predict, 1000); 
 
-    async function loop() {
-        if (webcam) {
-            webcam.update();
-            
-            let now = Date.now();
-            if (now - lastTime >= 3000) {
-                await predict();
-                lastTime = now;
-            }
+            // 4. Fire prediction loop strictly every 3000ms independently
+            predictionInterval = setInterval(predict, 3000);
+
+        } catch (error) {
+            console.error(error);
+            alert("System Error: Either camera permissions were denied, or your browser is blocking camera access on local files. Try copying this code into CodePen.io!");
+            btn.disabled = false;
+            btn.innerText = "Try Again";
         }
-        window.requestAnimationFrame(loop);
     }
 
     async function predict() {
-        if (!model || !webcam) return;
-        const prediction = await model.predict(webcam.canvas);
+        const videoElement = document.getElementById("webcam");
+        
+        // Double check stream is running before passing frame data over to TensorFlow
+        if (!model || !videoElement.srcObject) return;
+
+        // Directly pass the native HTML5 video frame element into the machine learning engine
+        const prediction = await model.predict(videoElement);
+        
         for (let i = 0; i < maxPredictions; i++) {
             let percent = (prediction[i].probability * 100).toFixed(0);
             labelContainer.childNodes[i].innerHTML = `
