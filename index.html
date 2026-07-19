@@ -3,165 +3,148 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Teachable Machine Image Model</title>
-    <!-- Tailwind CSS for sleek UI -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <title>AI Vision System</title>
     <style>
-        body { font-family: 'Inter', sans-serif; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+            text-align: center;
+            width: 340px;
+        }
+        button {
+            background: #007aff;
+            color: white;
+            border: none;
+            padding: 14px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 12px;
+            width: 100%;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        button:disabled {
+            background: #d1d1d6;
+            cursor: not-allowed;
+        }
+        #webcam-container {
+            width: 280px;
+            height: 280px;
+            margin: 0 auto 20px;
+            background: #e5e7eb;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        #webcam-container canvas {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover;
+        }
+        .result-item {
+            display: flex;
+            justify-content: space-between;
+            background: #f8f9fa;
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            border-radius: 10px;
+            font-size: 15px;
+        }
+        .status {
+            font-size: 13px;
+            color: #8e8e93;
+            margin-top: 15px;
+        }
     </style>
 </head>
-<body class="bg-slate-50 min-h-screen flex flex-col items-center justify-center p-4">
+<body>
 
-    <!-- Card Layout -->
-    <div class="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center border border-slate-100">
-        <h1 class="text-2xl font-semibold text-slate-800 mb-1">Teachable Machine</h1>
-        <p class="text-sm text-slate-400 mb-6">Camera Viewport (Predicts every 3s)</p>
-        
-        <!-- Main Action Button -->
-        <button type="button" id="start-btn" onclick="init()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-6 rounded-xl transition duration-200 shadow-md shadow-indigo-100 active:scale-[0.98]">
-            Start Camera & Model
-        </button>
+<div class="card">
+    <h2>AI Vision System</h2>
+    <button type="button" id="btn" onclick="init()">Start Camera</button>
+    <div id="webcam-container"></div>
+    <div id="label-container"></div>
+    <div class="status" id="status" style="display:none;">🔄 Updating predictions every 3 seconds</div>
+</div>
 
-        <!-- Status & Logs -->
-        <div id="status-message" class="mt-4 p-3 text-sm rounded-xl font-medium hidden"></div>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
 
-        <!-- Camera Container -->
-        <div id="webcam-container" class="mt-6 flex justify-center overflow-hidden rounded-xl bg-slate-100 border-2 border-dashed border-slate-200 aspect-square items-center hidden">
-            <!-- Camera Canvas Goes Here -->
-        </div>
+<script type="text/javascript">
+    const URL = "https://teachablemachine.withgoogle.com/models/OD2g-JJnk/";
+    let model, webcam, labelContainer, maxPredictions;
+    let lastTime = 0;
 
-        <!-- Output Progress Bars -->
-        <div id="label-container" class="mt-6 space-y-3 text-left"></div>
-    </div>
+    async function init() {
+        document.getElementById("btn").disabled = true;
+        document.getElementById("btn").innerText = "Loading Model...";
 
-    <!-- Core Libraries -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
-    
-    <script type="text/javascript">
-        // ⚠️ IF YOU RUN LATER, PASTE YOUR ONLINE TEACHABLE MACHINE LINK HERE
-        // Example: "https://teachablemachine.withgoogle.com/models/xxxxxx/"
-        const URL = "./my_model/";[cite: 3]
+        try {
+            model = await tmImage.load(URL + "model.json", URL + "metadata.json");
+            maxPredictions = model.getTotalClasses();
 
-        let model, webcam, labelContainer, maxPredictions;
-        let isModelLoaded = false;
-        let isPredicting = false;
-
-        function updateStatus(message, type) {
-            const statusBox = document.getElementById("status-message");
-            statusBox.innerText = message;
-            statusBox.classList.remove("hidden", "bg-red-50", "text-red-600", "bg-amber-50", "text-amber-600", "bg-emerald-50", "text-emerald-600");
+            webcam = new tmImage.Webcam(200, 200, true); 
+            await webcam.setup(); 
+            await webcam.play();
             
-            if (type === 'error') statusBox.classList.add("bg-red-50", "text-red-600");
-            if (type === 'warning') statusBox.classList.add("bg-amber-50", "text-amber-600");
-            if (type === 'success') statusBox.classList.add("bg-emerald-50", "text-emerald-600");
-        }
+            window.requestAnimationFrame(loop);
 
-        async function init() {
-            const startBtn = document.getElementById("start-btn");
-            startBtn.disabled = true;
-            startBtn.innerText = "Initializing...";
-
-            // STEP 1: FORCE THE WEBCAM TO START IMMEDIATELY FIRST
-            try {
-                const flip = true;[cite: 3]
-                webcam = new tmImage.Webcam(350, 350, flip); // Set camera element dimension
-                await webcam.setup(); // Trigger browser permission dialog
-                await webcam.play(); // Play live stream
-                
-                // Render Camera UI immediately
-                const webcamContainer = document.getElementById("webcam-container");
-                webcamContainer.classList.remove("hidden");
-                webcamContainer.innerHTML = ""; 
-                webcamContainer.appendChild(webcam.canvas);[cite: 3]
-
-                // Keep camera frames moving smoothly at 60fps
-                window.requestAnimationFrame(loop);[cite: 3]
-                
-                updateStatus("Camera started successfully. Fetching model next...", "warning");
-            } catch (cameraError) {
-                updateStatus("Camera Blocked! Please check browser permissions and allow webcam access.", "error");
-                startBtn.disabled = false;
-                startBtn.innerText = "Retry Camera Connection";
-                return; // Stop right here if camera fails
+            document.getElementById("webcam-container").appendChild(webcam.canvas);
+            
+            labelContainer = document.getElementById("label-container");
+            labelContainer.innerHTML = "";
+            for (let i = 0; i < maxPredictions; i++) {
+                let div = document.createElement("div");
+                div.className = "result-item";
+                labelContainer.appendChild(div);
             }
 
-            // STEP 2: TRY LOADING THE MODEL IN THE BACKGROUND
-            try {
-                const modelURL = URL + "model.json";[cite: 3]
-                const metadataURL = URL + "metadata.json";[cite: 3]
+            document.getElementById("btn").innerText = "System Active";
+            document.getElementById("status").style.display = "block";
+            lastTime = Date.now();
 
-                model = await tmImage.load(modelURL, metadataURL);[cite: 3]
-                maxPredictions = model.getTotalClasses();[cite: 3]
-                isModelLoaded = true;
+        } catch (e) {
+            console.error(e);
+            alert("Camera Access Error: Switch to CodePen/Codesandbox or use VS Code Live Server to run this successfully.");
+            document.getElementById("btn").disabled = false;
+            document.getElementById("btn").innerText = "Try Again";
+        }
+    }
 
-                // Build Accuracy Bar Charts dynamically
-                labelContainer = document.getElementById("label-container");[cite: 3]
-                labelContainer.innerHTML = "";
-                for (let i = 0; i < maxPredictions; i++) {[cite: 3]
-                    const item = document.createElement("div");
-                    item.className = "bg-slate-50 p-3 rounded-lg border border-slate-100";
-                    item.innerHTML = `
-                        <div class="flex justify-between text-sm font-medium text-slate-700 mb-1">
-                            <span class="class-name">Pending...</span>
-                            <span class="class-prob">0%</span>
-                        </div>
-                        <div class="w-full bg-slate-200 rounded-full h-2">
-                            <div class="bg-indigo-600 h-2 rounded-full class-bar transition-all duration-300" style="width: 0%"></div>
-                        </div>
-                    `;
-                    labelContainer.appendChild(item);[cite: 3]
-                }
-
-                startBtn.innerText = "System Live";
-                startBtn.className = "w-full bg-emerald-600 text-white font-medium py-3 px-6 rounded-xl cursor-not-allowed opacity-80";
-                updateStatus("Model connected. Running predictions every 3 seconds.", "success");
-
-                // Execute immediate prediction
+    async function loop() {
+        if (webcam) {
+            webcam.update();
+            
+            let now = Date.now();
+            if (now - lastTime >= 3000) {
                 await predict();
-
-                // Setup the 3-second processing loop safely
-                setInterval(async () => {
-                    if (isModelLoaded && !isPredicting) {
-                        isPredicting = true;
-                        await predict();
-                        isPredicting = false;
-                    }
-                }, 3000);
-
-            } catch (modelError) {
-                // If model path is wrong, the camera still stays OPEN and functional
-                updateStatus("Camera is live, but model files missing at: " + URL, "error");
-                startBtn.innerText = "Running Camera Only";
-                startBtn.className = "w-full bg-amber-500 text-white font-medium py-3 px-6 rounded-xl cursor-not-allowed";
+                lastTime = now;
             }
         }
+        window.requestAnimationFrame(loop);
+    }
 
-        async function loop() {
-            webcam.update(); // Keep camera screen feed updated real-time[cite: 3]
-            window.requestAnimationFrame(loop);[cite: 3]
+    async function predict() {
+        if (!model || !webcam) return;
+        const prediction = await model.predict(webcam.canvas);
+        for (let i = 0; i < maxPredictions; i++) {
+            let percent = (prediction[i].probability * 100).toFixed(0);
+            labelContainer.childNodes[i].innerHTML = `
+                <span>${prediction[i].className}</span>
+                <strong>${percent}%</strong>
+            `;
         }
-
-        async function predict() {
-            if (!model || !webcam) return;
-            try {
-                const prediction = await model.predict(webcam.canvas);[cite: 3]
-                const items = labelContainer.childNodes;
-
-                for (let i = 0; i < maxPredictions; i++) {[cite: 3]
-                    const className = prediction[i].className;[cite: 3]
-                    const probability = prediction[i].probability;[cite: 3]
-                    const percentage = (probability * 100).toFixed(0);
-
-                    items[i].querySelector(".class-name").innerText = className;
-                    items[i].querySelector(".class-prob").innerText = percentage + "%";
-                    items[i].querySelector(".class-bar").style.width = percentage + "%";
-                }
-            } catch (e) {
-                console.error("Prediction loop failed", e);
-            }
-        }
-    </script>
+    }
+</script>
 </body>
 </html>
