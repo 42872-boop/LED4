@@ -1,153 +1,60 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Vision System</title>
-    <style>
-        body {
-            font-family: system-ui, -apple-system, sans-serif;
-            background: #f0f2f5;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-        }
-        .card {
-            background: white;
-            padding: 30px;
-            border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
-            text-align: center;
-            width: 340px;
-        }
-        button {
-            background: #007aff;
-            color: white;
-            border: none;
-            padding: 14px;
-            font-size: 16px;
-            font-weight: bold;
-            border-radius: 12px;
-            width: 100%;
-            cursor: pointer;
-            margin-bottom: 20px;
-            transition: background 0.2s;
-        }
-        button:hover {
-            background: #0062cc;
-        }
-        button:disabled {
-            background: #d1d1d6;
-            cursor: not-allowed;
-        }
-        .video-wrapper {
-            width: 280px;
-            height: 280px;
-            margin: 0 auto 20px;
-            background: #000;
-            border-radius: 16px;
-            overflow: hidden;
-            position: relative;
-        }
-        #webcam {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1);
-        }
-        .result-item {
-            display: flex;
-            justify-content: space-between;
-            background: #f8f9fa;
-            padding: 12px 16px;
-            margin-bottom: 8px;
-            border-radius: 10px;
-            font-size: 15px;
-            border-left: 4px solid #007aff;
-        }
-        .status {
-            font-size: 13px;
-            color: #8e8e93;
-            margin-top: 15px;
-        }
-    </style>
-</head>
-<body>
 
-<div class="card">
-    <div>AI Vision System</div>
-    <button type="button" id="btn" onclick="startSystem()">Start System</button>
-    <div class="video-wrapper">
-        <video id="webcam" autoplay playsinline muted></video>
-    </div>
-    <div id="label-container"></div>
-    <div class="status" id="status" style="display:none;">🔄 AI predicting every 3 seconds</div>
-</div>
-
+<div>Teachable Machine Image Model</div>
+<button type="button" onclick="init()">Start</button>
+<div id="webcam-container"></div>
+<div id="label-container"></div>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
-
 <script type="text/javascript">
-    const MODEL_URL = "https://teachablemachine.withgoogle.com/models/OD2g-JJnk/";
-    let model, maxPredictions, labelContainer;
-    let predictionInterval;
+    // More API functions here:
+    // https://github.com/googlecreativelab/teachablemachine-community/tree/master/libraries/image
 
-    async function startSystem() {
-        const btn = document.getElementById("btn");
-        btn.disabled = true;
-        btn.innerText = "Initializing...";
+    // the link to your model provided by Teachable Machine export panel
+    const URL = "https://teachablemachine.withgoogle.com/models/ni352w25U/";
 
-        try {
-            model = await tmImage.load(MODEL_URL + "model.json", MODEL_URL + "metadata.json");
-            maxPredictions = model.getTotalClasses();
+    let model, webcam, labelContainer, maxPredictions;
 
-            const videoElement = document.getElementById("webcam");
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { width: 400, height: 400, facingMode: "user" },
-                audio: false
-            });
-            
-            videoElement.srcObject = stream;
+    // Load the image model and setup the webcam
+    async function init() {
+        const modelURL = URL + "model.json";
+        const metadataURL = URL + "metadata.json";
 
-            labelContainer = document.getElementById("label-container");
-            labelContainer.innerHTML = "";
-            for (let i = 0; i < maxPredictions; i++) {
-                let div = document.createElement("div");
-                div.className = "result-item";
-                labelContainer.appendChild(div);
-            }
+        // load the model and metadata
+        // Refer to tmImage.loadFromFiles() in the API to support files from a file picker
+        // or files from your local hard drive
+        // Note: the pose library adds "tmImage" object to your window (window.tmImage)
+        model = await tmImage.load(modelURL, metadataURL);
+        maxPredictions = model.getTotalClasses();
 
-            document.getElementById("status").style.display = "block";
-            btn.innerText = "System Active";
+        // Convenience function to setup a webcam
+        const flip = true; // whether to flip the webcam
+        webcam = new tmImage.Webcam(200, 200, flip); // width, height, flip
+        await webcam.setup(); // request access to the webcam
+        await webcam.play();
+        window.requestAnimationFrame(loop);
 
-            setTimeout(predict, 1000); 
-            predictionInterval = setInterval(predict, 3000);
-
-        } catch (error) {
-            console.error(error);
-            alert("System Error: Check permissions or host using Live Server / CodePen.");
-            btn.disabled = false;
-            btn.innerText = "Try Again";
+        // append elements to the DOM
+        document.getElementById("webcam-container").appendChild(webcam.canvas);
+        labelContainer = document.getElementById("label-container");
+        for (let i = 0; i < maxPredictions; i++) { // and class labels
+            labelContainer.appendChild(document.createElement("div"));
         }
     }
 
-    async function predict() {
-        const videoElement = document.getElementById("webcam");
-        
-        if (!model || !videoElement.srcObject) return;
+    async function loop() {
+        webcam.update(); // update the webcam frame
+        await predict();
+        window.requestAnimationFrame(loop);
+    }
 
-        const prediction = await model.predict(videoElement);
-        
+    // run the webcam image through the image model
+    async function predict() {
+        // predict can take in an image, video or canvas html element
+        const prediction = await model.predict(webcam.canvas);
         for (let i = 0; i < maxPredictions; i++) {
-            let percent = (prediction[i].probability * 100).toFixed(0);
-            labelContainer.childNodes[i].innerHTML = `
-                <span>${prediction[i].className}</span>
-                <strong>${percent}%</strong>
-            `;
+            const classPrediction =
+                prediction[i].className + ": " + prediction[i].probability.toFixed(2);
+            labelContainer.childNodes[i].innerHTML = classPrediction;
         }
     }
 </script>
-</body>
-</html>
